@@ -1,0 +1,13 @@
+node_modules/
+dist/
+logs/
+.env
+
+# Ignore database files
+*.db
+*.sqlite
+# Ignore coverage reports
+coverage/
+# Ignore build artifacts
+build/
+
