@@ -10,13 +10,17 @@ const pageTitles = {
   '/products': 'Produk',
   '/products/new': 'Tambah Produk',
   '/qc-master/templates': 'QC Templates',
-  '/qc-master/defect-types': 'Tipe Defect'
+  '/qc-master/defect-types': 'Tipe Defect',
+  '/receiving/purchase-orders': 'Purchase Orders',
+  '/receiving': 'Penerimaan Barang',
+  '/receiving/warehouse-requests': 'Permintaan Gudang'
 }
 
 const getPageTitle = (pathname) => {
   if (pageTitles[pathname]) return pageTitles[pathname]
   if (pathname.includes('/level-inspections')) return 'Level Inspeksi'
   if (pathname.includes('/edit')) return 'Edit Produk'
+  if (/^\/receiving\/[^/]+$/.test(pathname) && pathname !== '/receiving/warehouse-requests') return 'Detail Penerimaan'
   return 'Energy Meter'
 }
 
