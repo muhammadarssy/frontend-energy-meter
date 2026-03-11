@@ -2,13 +2,16 @@ import React, { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRight, ChevronDown, Plus, Search, Edit2,
-  ScanLine, Trash2, X, PackageCheck
+  ScanLine, Trash2, X, PackageCheck, ClipboardCheck, History,
+  Paperclip, Download, FileText, Image, File
 } from 'lucide-react'
 import {
   getPurchaseOrders, createPurchaseOrder, updatePurchaseOrder,
   getReceivingHeaders, getReceivingHeader, createReceivingHeader,
   createReceivingItem, deleteReceivingItem,
-  getSerialStagings, scanSerial, deleteSerial
+  getSerialStagings, scanSerial, deleteSerial,
+  getReceivingConfirmations, createReceivingConfirmation,
+  getAttachments, uploadAttachments, deleteAttachment, FILE_BASE_URL
 } from '../../api/receiving'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
@@ -19,8 +22,7 @@ import Pagination from '../../components/ui/Pagination'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import ProductSearch from '../../components/ui/ProductSearch'
 
-const statusColor = { pending: 'yellow', accept: 'green', reject: 'red' }
-const statusLabel = { pending: 'Pending', accept: 'Diterima', reject: 'Ditolak' }
+const isConfirmed = (grHeader) => (grHeader._count?.confirmations ?? 0) > 0
 const itemTypeLabel = { product: 'Produk', service: 'Servis', material: 'Material' }
 
 // ─── Serial Scan Panel ────────────────────────────────────────────────────────
@@ -219,6 +221,200 @@ const AddItemModal = ({ headerId, grStatus, isOpen, onClose }) => {
   )
 }
 
+// ─── Confirm Receiving Modal ──────────────────────────────────────────────────
+const ConfirmReceivingModal = ({ headerId, isOpen, onClose }) => {
+  const qc = useQueryClient()
+  const [note, setNote] = useState('')
+
+  React.useEffect(() => { if (isOpen) setNote('') }, [isOpen])
+
+  const mutation = useMutation({
+    mutationFn: (data) => createReceivingConfirmation(headerId, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['receiving-confirmations', headerId] })
+      qc.invalidateQueries({ queryKey: ['po-grs'] })
+      onClose()
+    }
+  })
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Konfirmasi Penerimaan"
+      onConfirm={() => mutation.mutate({ note: note || undefined })}
+      confirmLabel="Konfirmasi"
+      loading={mutation.isPending}
+    >
+      <div className="space-y-3">
+        {mutation.isError && (
+          <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
+            {mutation.error?.response?.data?.message || 'Terjadi kesalahan'}
+          </p>
+        )}
+        <p className="text-sm text-gray-600">Konfirmasi penerimaan barang ini? Riwayat konfirmasi akan disimpan.</p>
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">Catatan <span className="text-gray-400 font-normal">(opsional)</span></label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="Catatan untuk konfirmasi ini..."
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+          />
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Documents Panel ──────────────────────────────────────────────────────────
+const getFileIcon = (mimeType) => {
+  if (mimeType?.startsWith('image/')) return <Image className="w-4 h-4 text-blue-500 flex-shrink-0" />
+  if (mimeType === 'application/pdf') return <FileText className="w-4 h-4 text-red-500 flex-shrink-0" />
+  return <File className="w-4 h-4 text-gray-400 flex-shrink-0" />
+}
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const DocumentsPanel = ({ entityType, entityId, readonly }) => {
+  const qc = useQueryClient()
+  const fileInputRef = React.useRef(null)
+  const [selectedFiles, setSelectedFiles] = React.useState([])
+  const [uploading, setUploading] = React.useState(false)
+  const [uploadError, setUploadError] = React.useState('')
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['attachments', entityType, entityId],
+    queryFn: () => getAttachments(entityType, entityId),
+    enabled: !!entityId
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => deleteAttachment(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['attachments', entityType, entityId] })
+  })
+
+  const handleFileChange = (e) => {
+    setSelectedFiles(Array.from(e.target.files))
+    setUploadError('')
+  }
+
+  const handleUpload = async () => {
+    if (!selectedFiles.length) return
+    setUploading(true)
+    setUploadError('')
+    try {
+      await uploadAttachments(entityType, entityId, selectedFiles)
+      qc.invalidateQueries({ queryKey: ['attachments', entityType, entityId] })
+      setSelectedFiles([])
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } catch (err) {
+      setUploadError(err?.response?.data?.message || 'Gagal upload file')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const attachments = data?.data || []
+
+  return (
+    <div className="mt-1 mb-2 ml-4 bg-gray-50 border border-gray-200 rounded-xl p-3 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Paperclip className="w-3 h-3 text-gray-400" />
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Dokumen</p>
+        {attachments.length > 0 && (
+          <span className="text-xs text-gray-400">({attachments.length})</span>
+        )}
+      </div>
+
+      {/* Upload area */}
+      {!readonly && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".jpg,.jpeg,.png,.pdf,.docx,.xlsx"
+              onChange={handleFileChange}
+              className="hidden"
+              id={`doc-input-${entityId}`}
+            />
+            <label
+              htmlFor={`doc-input-${entityId}`}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-blue-600 border border-blue-200 bg-white rounded-lg hover:bg-blue-50 cursor-pointer"
+            >
+              <Paperclip className="w-3 h-3" /> Pilih File
+            </label>
+            {selectedFiles.length > 0 && (
+              <>
+                <span className="text-xs text-gray-500 truncate max-w-[180px]">
+                  {selectedFiles.map(f => f.name).join(', ')}
+                </span>
+                <button
+                  onClick={handleUpload}
+                  disabled={uploading}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {uploading ? 'Mengupload...' : `Upload ${selectedFiles.length} file`}
+                </button>
+              </>
+            )}
+          </div>
+          {uploadError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">{uploadError}</p>
+          )}
+          <p className="text-xs text-gray-400">Format: JPG, PNG, PDF, DOCX, XLSX (maks 10MB/file)</p>
+        </div>
+      )}
+
+      {/* Document list */}
+      {isLoading ? (
+        <div className="flex justify-center py-2"><Spinner /></div>
+      ) : attachments.length === 0 ? (
+        <p className="text-xs text-gray-400 text-center py-1">Belum ada dokumen</p>
+      ) : (
+        <div className="space-y-1">
+          {attachments.map((att) => (
+            <div key={att.id} className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2">
+              {getFileIcon(att.file_type)}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-gray-700 truncate">{att.file_name}</p>
+                <p className="text-xs text-gray-400">{formatFileSize(att.file_size)}</p>
+              </div>
+              <a
+                href={`${FILE_BASE_URL}${att.file_url}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-1 text-gray-400 hover:text-blue-600 rounded flex-shrink-0"
+                title="Buka / Download"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </a>
+              {!readonly && (
+                <button
+                  onClick={() => deleteMutation.mutate(att.id)}
+                  disabled={deleteMutation.isPending}
+                  className="p-1 text-gray-300 hover:text-red-500 rounded flex-shrink-0"
+                  title="Hapus"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── GR Row (expandable, lazy load items) ────────────────────────────────────
 const GRRow = ({ grHeader }) => {
   const qc = useQueryClient()
@@ -226,10 +422,18 @@ const GRRow = ({ grHeader }) => {
   const [scanItemId, setScanItemId] = useState(null)
   const [addItemOpen, setAddItemOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [docsOpen, setDocsOpen] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['gr-detail', grHeader.id],
     queryFn: () => getReceivingHeader(grHeader.id),
+    enabled: expanded
+  })
+
+  const { data: confData } = useQuery({
+    queryKey: ['receiving-confirmations', grHeader.id],
+    queryFn: () => getReceivingConfirmations(grHeader.id),
     enabled: expanded
   })
 
@@ -244,6 +448,7 @@ const GRRow = ({ grHeader }) => {
   const fullGR = data?.data
   const items = fullGR?.receiving_items || []
   const scanItem = items.find(i => i.id === scanItemId)
+  const confirmations = confData?.data || []
 
   return (
     <div className="ml-6 border-l-2 border-blue-100 pl-3">
@@ -256,8 +461,8 @@ const GRRow = ({ grHeader }) => {
           {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </span>
         <span className="font-mono font-semibold text-sm text-blue-800">{grHeader.gr_number}</span>
-        <Badge color={statusColor[grHeader.status] || 'gray'} className="text-xs">
-          {statusLabel[grHeader.status] || grHeader.status}
+        <Badge color={isConfirmed(grHeader) ? 'green' : 'yellow'} className="text-xs">
+          {isConfirmed(grHeader) ? 'Dikonfirmasi' : 'Pending'}
         </Badge>
         <span className="text-xs text-gray-500 ml-1">
           {grHeader.received_date ? new Date(grHeader.received_date).toLocaleDateString('id-ID') : '—'}
@@ -267,7 +472,7 @@ const GRRow = ({ grHeader }) => {
           <span className="text-xs text-gray-400 font-mono">• batch: {grHeader.batch.code}</span>
         )}
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-          {grHeader.status === 'pending' && (
+          {!isConfirmed(grHeader) && (
             <button
               onClick={() => setAddItemOpen(true)}
               className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 hover:bg-blue-100 rounded-md"
@@ -275,6 +480,20 @@ const GRRow = ({ grHeader }) => {
               <Plus className="w-3 h-3" /> Item
             </button>
           )}
+          {!isConfirmed(grHeader) && (
+            <button
+              onClick={() => setConfirmOpen(true)}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-green-700 hover:bg-green-100 rounded-md border border-green-200"
+            >
+              <ClipboardCheck className="w-3 h-3" /> Konfirmasi
+            </button>
+          )}
+          <button
+            onClick={() => { setDocsOpen(v => !v); if (!expanded) setExpanded(true) }}
+            className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${docsOpen ? 'text-purple-700 bg-purple-50 border-purple-200' : 'text-gray-500 hover:bg-gray-100 border-gray-200'}`}
+          >
+            <Paperclip className="w-3 h-3" /> Dokumen
+          </button>
         </div>
       </div>
 
@@ -287,7 +506,7 @@ const GRRow = ({ grHeader }) => {
             <div className="flex flex-col items-center py-4 text-gray-400">
               <PackageCheck className="w-6 h-6 mb-1 text-gray-300" />
               <p className="text-xs">Belum ada item</p>
-              {grHeader.status === 'pending' && (
+              {!isConfirmed(grHeader) && (
                 <button onClick={() => setAddItemOpen(true)} className="mt-2 text-xs text-blue-600 hover:underline flex items-center gap-1">
                   <Plus className="w-3 h-3" /> Tambah Item
                 </button>
@@ -338,7 +557,7 @@ const GRRow = ({ grHeader }) => {
                                   <ScanLine className="w-3.5 h-3.5" />
                                 </button>
                               )}
-                              {fullGR?.status === 'pending' && (
+                              {!isConfirmed(grHeader) && (
                                 <button
                                   onClick={() => setDeleteTarget(item)}
                                   className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
@@ -366,9 +585,36 @@ const GRRow = ({ grHeader }) => {
         </div>
       )}
 
+      {/* Confirmation History */}
+      {expanded && confirmations.length > 0 && (
+        <div className="ml-4 mt-1 mb-2">
+          <div className="flex items-center gap-1.5 mb-1 px-1">
+            <History className="w-3 h-3 text-gray-400" />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Riwayat Konfirmasi</p>
+          </div>
+          <div className="space-y-1">
+            {confirmations.map((c) => (
+              <div key={c.id} className="flex items-center gap-2 text-xs bg-white border border-gray-100 rounded-lg px-3 py-2">
+                <span className="text-gray-600 font-medium">{c.user?.name || '—'}</span>
+                <span className="text-gray-400">{new Date(c.confirmed_at).toLocaleString('id-ID')}</span>
+                {c.note && <span className="text-gray-500 truncate max-w-[200px]">· {c.note}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Documents Panel */}
+      {expanded && docsOpen && (
+        <DocumentsPanel
+          entityType="receiving_header"
+          entityId={grHeader.id}
+          readonly={isConfirmed(grHeader)}
+        />
+      )}
+
       <AddItemModal
         headerId={grHeader.id}
-        grStatus={grHeader.status}
         isOpen={addItemOpen}
         onClose={() => setAddItemOpen(false)}
       />
@@ -381,6 +627,12 @@ const GRRow = ({ grHeader }) => {
         message={`Hapus item "${deleteTarget?.product?.name || 'ini'}"?`}
         confirmLabel="Hapus"
         loading={deleteItemMutation.isPending}
+      />
+
+      <ConfirmReceivingModal
+        headerId={grHeader.id}
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
       />
     </div>
   )

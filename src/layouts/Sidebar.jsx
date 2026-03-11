@@ -13,7 +13,8 @@ import {
   Key,
   FolderOpen,
   PackageCheck,
-  Warehouse
+  Warehouse,
+  Activity
 } from 'lucide-react'
 
 const navItems = [
@@ -88,6 +89,11 @@ const receivingItems = [
     label: 'Permintaan Gudang',
     to: '/receiving/warehouse-requests',
     icon: Warehouse
+  },
+  {
+    label: 'Data Tracking',
+    to: '/receiving/tracking',
+    icon: Activity
   }
 ]
 

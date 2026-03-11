@@ -17,6 +17,7 @@ import Roles from './pages/roles/Roles'
 import Permissions from './pages/roles/Permissions'
 import ReceivingList from './pages/receiving/ReceivingList'
 import WarehouseRequests from './pages/receiving/WarehouseRequests'
+import TrackingList from './pages/receiving/TrackingList'
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated } = useAuth()
@@ -52,6 +53,7 @@ const AppRoutes = () => {
         <Route path="access/permissions" element={<Permissions />} />
         <Route path="receiving" element={<ReceivingList />} />
         <Route path="receiving/warehouse-requests" element={<WarehouseRequests />} />
+        <Route path="receiving/tracking" element={<TrackingList />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

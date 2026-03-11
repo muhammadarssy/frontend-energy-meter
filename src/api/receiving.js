@@ -78,6 +78,18 @@ export const deleteReceivingItem = async (itemId) => {
   return res.data
 }
 
+// ─── Receiving Confirmations ──────────────────────────────────────────────────
+
+export const getReceivingConfirmations = async (headerId) => {
+  const res = await apiClient.get(`/receiving-headers/${headerId}/confirmations`)
+  return res.data
+}
+
+export const createReceivingConfirmation = async (headerId, data) => {
+  const res = await apiClient.post(`/receiving-headers/${headerId}/confirmations`, data)
+  return res.data
+}
+
 // ─── Serial Stagings ─────────────────────────────────────────────────────────
 
 export const getSerialStagings = async (receivingItemId) => {
@@ -119,5 +131,30 @@ export const approveWarehouseRequest = async (id) => {
 
 export const rejectWarehouseRequest = async (id, data) => {
   const res = await apiClient.patch(`/warehouse-requests/${id}/reject`, data)
+  return res.data
+}
+
+// ─── Attachments ──────────────────────────────────────────────────────────────
+
+export const FILE_BASE_URL = apiClient.defaults.baseURL.replace('/api', '')
+
+export const getAttachments = async (entityType, entityId) => {
+  const res = await apiClient.get(`/attachments/entity/${entityType}/${entityId}`)
+  return res.data
+}
+
+export const uploadAttachments = async (entityType, entityId, files) => {
+  const formData = new FormData()
+  files.forEach(file => formData.append('files', file))
+  formData.append('entity_type', entityType)
+  formData.append('entity_id', entityId)
+  const res = await apiClient.post('/attachments/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+  return res.data
+}
+
+export const deleteAttachment = async (id) => {
+  const res = await apiClient.delete(`/attachments/${id}`)
   return res.data
 }
